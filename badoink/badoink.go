@@ -30,16 +30,7 @@ func NewProvider(c *http.Client) (p *Badoink) {
 }
 
 func (p *Badoink) Content() {
-	req, err := http.NewRequest(http.MethodGet, badoinkURL, nil)
-	if err != nil {
-		log.Warn("Creating Request Failed: %v", err)
-	}
-	accessCookie := &http.Cookie{Name: "legal_age", Value: "true"}
-	req.AddCookie(accessCookie)
-	res, err := p.c.Do(req)
-	if err != nil {
-		log.Warn("Request Badoink failed: %v", err)
-	}
+	res := createRequest(badoinkURL, p)
 	defer res.Body.Close()
 
 	doc, err := goquery.NewDocumentFromReader(res.Body)
@@ -52,14 +43,14 @@ func (p *Badoink) Content() {
 		for _, n := range s.Nodes {
 			for _, a := range n.Attr {
 				if a.Key == "href" {
-					handleVideoLink(a.Val)
+					handleVideoLink(a.Val, p)
 				}
 			}
 		}
 	})
 }
 
-func handleVideoLink(l string) {
+func handleVideoLink(l string, p *Badoink) {
 	videoTitle := strings.Split(l, "/")[2]
 	videoFolderPath := badoinkFolderPath + string(filepath.Separator) + videoTitle
 	if _, err := os.Stat(videoFolderPath); os.IsNotExist(err) {
@@ -68,11 +59,30 @@ func handleVideoLink(l string) {
 		if err != nil {
 			log.Warn("Couldn't create Badoink video directory: %v", err)
 		}
-		downloadAssets
 	}
 }
 
-func downloadAssets(l, videoFolderPath string) error {
+func downloadAssets(link, videoFolderPath string, p *Badoink) error {
+	res := createRequest(badoinkURL+link, p)
+	defer res.Body.Close()
 
+	doc, err := goquery.NewDocumentFromReader(res.Body)
+	if err != nil {
+		log.Warn("GoQuery Reader error: %v", err)
+	}
 	return nil
+}
+
+func createRequest(URL string, p *Badoink) (res *http.Response) {
+	req, err := http.NewRequest(http.MethodGet, URL, nil)
+	if err != nil {
+		log.Warn("Creating Request Failed: %v", err)
+	}
+	accessCookie := &http.Cookie{Name: "legal_age", Value: "true"}
+	req.AddCookie(accessCookie)
+	res, err = p.c.Do(req)
+	if err != nil {
+		log.Warn("Request Badoink failed: %v", err)
+	}
+	return res
 }
