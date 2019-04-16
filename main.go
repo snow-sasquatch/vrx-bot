@@ -2,11 +2,11 @@ package main
 
 import (
 	"net/http"
-	"vrx-bot/providers"
+	"vrx-bot/badoink"
 )
 
 func main() {
 	c := &http.Client{}
-	b := providers.NewBadoinkProvider(c)
+	b := badoink.NewProvider(c)
 	b.Content()
 }
