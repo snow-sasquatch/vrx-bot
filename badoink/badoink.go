@@ -1,12 +1,16 @@
 package badoink
 
 import (
+	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	log "github.com/sirupsen/logrus"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 )
 
 const badoinkURL = "https://badoinkvr.com"
@@ -26,6 +30,7 @@ func NewProvider(c *http.Client) (p *Badoink) {
 			log.Warn("Couldn't create Badoink data directory: %v", err)
 		}
 	}
+	log.Infof("Badoink data folder is located at: %v", badoinkFolderPath)
 	return p
 }
 
@@ -53,12 +58,15 @@ func (p *Badoink) Content() {
 func handleVideoLink(l string, p *Badoink) {
 	videoTitle := strings.Split(l, "/")[2]
 	videoFolderPath := badoinkFolderPath + string(filepath.Separator) + videoTitle
+
+	//If the data folder for a video release does not exist we create one and download the video assets
 	if _, err := os.Stat(videoFolderPath); os.IsNotExist(err) {
 		err = os.Mkdir(videoFolderPath, 0777)
-		//If the data folder for a video release does not exist we create one and download the video assets
 		if err != nil {
 			log.Warn("Couldn't create Badoink video directory: %v", err)
+			return
 		}
+		downloadAssets(l, videoFolderPath, p)
 	}
 }
 
@@ -70,7 +78,43 @@ func downloadAssets(link, videoFolderPath string, p *Badoink) error {
 	if err != nil {
 		log.Warn("GoQuery Reader error: %v", err)
 	}
+
+	var wg sync.WaitGroup
+
+	doc.Find(".gallery-item").Each(func(i int, s *goquery.Selection) {
+		for _, n := range s.Nodes {
+			for _, a := range n.Attr {
+				if a.Key == "data-big-image" {
+					wg.Add(1)
+					go downloadImage(a.Val, videoFolderPath, i, &wg, p)
+				}
+			}
+		}
+	})
+	wg.Wait()
+	log.Info(fmt.Sprintf("downloaded picture pack: %s", videoFolderPath))
 	return nil
+}
+
+func downloadImage(imageLink string, videoFolderPath string, pictureNum int, wg *sync.WaitGroup, p *Badoink) {
+	defer wg.Done()
+	response, e := p.c.Get(imageLink)
+	if e != nil {
+		log.Warn(fmt.Sprintf("Failed to Download image at %s: %v", imageLink, e))
+	}
+	defer response.Body.Close()
+
+	file, err := os.Create(videoFolderPath + string(filepath.Separator) + strconv.Itoa(pictureNum) + ".jpg")
+	if err != nil {
+		log.Warn(fmt.Sprintf("Failed to create file for %s: %v", imageLink, err))
+	}
+	defer file.Close()
+
+	// Use io.Copy to just dump the response body to the file. This supports huge files
+	_, err = io.Copy(file, response.Body)
+	if err != nil {
+		log.Warn(fmt.Sprintf("Failed to save file from %s: %v", imageLink, err))
+	}
 }
 
 func createRequest(URL string, p *Badoink) (res *http.Response) {
